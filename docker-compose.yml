@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: taskflow
+      POSTGRES_USER: taskflow
+      POSTGRES_PASSWORD: taskflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: taskflow
+      RABBITMQ_DEFAULT_PASS: taskflow
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  auth_service:
+    build: ./services/auth_service
+    ports:
+      - "8001:8000"
+    environment:
+      - DATABASE_URL=postgresql://taskflow:taskflow@postgres:5432/taskflow
+      - REDIS_URL=redis://redis:6379
+      - SECRET_KEY=dev-secret-key-change-in-production
+      - DEBUG=True
+    depends_on:
+      - postgres
+      - redis
+
+  tasks_service:
+    build: ./services/tasks_service
+    ports:
+      - "8002:8000"
+    environment:
+      - DATABASE_URL=postgresql://taskflow:taskflow@postgres:5432/taskflow
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://taskflow:taskflow@rabbitmq:5672
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+
+  notifications_service:
+    build: ./services/notifications_service
+    ports:
+      - "8003:8000"
+    environment:
+      - RABBITMQ_URL=amqp://taskflow:taskflow@rabbitmq:5672
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - rabbitmq
+      - redis
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+
+  proxy:
+    image: nginx:alpine
+    ports:
+      - "8000:80"
+    volumes:
+      - ./proxy/nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - auth_service
+      - tasks_service
+      - notifications_service
+      - frontend
+
+volumes:
+  postgres_data:
